@@ -4,6 +4,8 @@ from flask import Flask, request, jsonify, render_template
 import google.generativeai as genai
 from models import db, Project, ApprovedBlock, ChatHistory, ProjectFile
 from dotenv import load_dotenv
+import logging
+from logging import StreamHandler, Formatter
 
 load_dotenv()
 
@@ -12,6 +14,12 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sard.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
+
+sard_logger = logging.getLogger('sard_logger')
+sard_logger.setLevel(logging.DEBUG if os.getenv('FLASK_ENV', 'development') == 'development' else logging.INFO)
+handler = StreamHandler()
+handler.setFormatter(Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s'))
+sard_logger.addHandler(handler)
 
 # Ensure the database is created
 with app.app_context():
@@ -47,6 +55,7 @@ def handle_projects():
         project = Project(title=title)
         db.session.add(project)
         db.session.commit()
+        sard_logger.info(f"Initialized new project (state_id={project.current_state})")
         return jsonify(project.to_dict()), 201
     else:
         projects = Project.query.all()
@@ -85,8 +94,14 @@ def chat(project_id):
     # model = genai.GenerativeModel('gemini-3.1-pro-preview')
     # Use Structured outputs (JSON)
     # prompt = build_prompt(project)
-    # response = model.generate_content(prompt)
     
+    system_prompt_length = len(load_prompt(project.current_state))
+    approved_blocks_count = ApprovedBlock.query.filter_by(project_id=project.id).count()
+    chat_history_length = ChatHistory.query.filter_by(project_id=project.id).count()
+    
+    sard_logger.debug(f"AI Request Context: SystemPrompt_Length={system_prompt_length}, ApprovedBlocks_Count={approved_blocks_count}, ChatHistory_Length={chat_history_length}")
+    sard_logger.info("Executing API request to gemini-3.1-pro-preview")
+
     # Mocking cognitive simulation response
     response_json = {
         "agents_dialogue": [
@@ -96,6 +111,17 @@ def chat(project_id):
         "facilitator_summary": f"Please clarify the requirements for {project.current_state}."
     }
     
+    # response = model.generate_content(prompt)
+    sard_logger.debug(f"Raw AI Response: {json.dumps(response_json)}")
+    
+    try:
+        # In real code: parsed_res = json.loads(response.text)
+        parsed_res = response_json
+    except json.JSONDecodeError as e:
+        sard_logger.error(f"JSONDecodeError during AI response parsing: {e}")
+    except Exception as e:
+        sard_logger.error(f"Error calling model: {e}")
+
     model_chat = ChatHistory(project_id=project.id, state_id=project.current_state, role='model', content=json.dumps(response_json))
     db.session.add(model_chat)
     db.session.commit()
@@ -126,11 +152,13 @@ def save_block(project_id):
             if b:
                 b.status = 'outdated'
         project.current_state = state_id # Soft rollback
+        sard_logger.info(f"Project state changed (Soft Rollback): state_id={project.current_state}")
     elif state_id == project.current_state:
         # Advance current state if possible
         idx = STATES.index(project.current_state)
         if idx < len(STATES) - 1:
             project.current_state = STATES[idx + 1]
+            sard_logger.info(f"Project state changed (Advanced): state_id={project.current_state}")
     
     # Cleanup chat for current state
     ChatHistory.query.filter_by(project_id=project.id, state_id=state_id).delete()
@@ -151,6 +179,7 @@ def upload_file(project_id):
     # In a real impl, decode PDF/TXT, send to gemini-2.5-flash
     raw_text = file.read().decode('utf-8', errors='ignore')
     
+    sard_logger.info(f"Starting AI-Distillation for {file.filename} via gemini-2.5-flash")
     # Mock distillation
     distilled_context = json.dumps({"facts": ["Extracted facts from file"]})
     

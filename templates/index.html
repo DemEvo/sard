@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI T-Spec Generator</title>
+    <title data-i18n="title_doc">AI T-Spec Generator</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="app-container">
         <header>
-            <h1>AI T-Spec Generator <span>(SARD Methodology)</span></h1>
+            <h1><span data-i18n="header_title">AI T-Spec Generator</span> <span data-i18n="header_subtitle">(SARD Methodology)</span></h1>
             <div id="project-selector"></div>
         </header>
         
@@ -19,10 +19,10 @@
         </main>
         
         <aside id="file-uploader">
-            <h3>Project Files</h3>
-            <p style="font-size: 0.85em; color: var(--locked);">Upload relevant PDFs or text files to enrich baseline context.</p>
+            <h3 data-i18n="title_project_files">Project Files</h3>
+            <p style="font-size: 0.85em; color: var(--locked);" data-i18n="desc_upload_files">Upload relevant PDFs or text files to enrich baseline context.</p>
             <input type="file" id="file-input" />
-            <button onclick="uploadFile()">Upload Context File</button>
+            <button onclick="uploadFile()" data-i18n="btn_upload">Upload Context File</button>
             <ul id="file-list"></ul>
             <div id="upload-status"></div>
         </aside>
