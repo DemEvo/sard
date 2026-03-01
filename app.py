@@ -1,11 +1,13 @@
 import os
 import json
 from flask import Flask, request, jsonify, render_template
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from models import db, Project, ApprovedBlock, ChatHistory, ProjectFile
 from dotenv import load_dotenv
 import logging
 from logging import StreamHandler, Formatter
+import glob  # Добавь в импорты
 
 load_dotenv()
 
@@ -26,7 +28,7 @@ with app.app_context():
     db.create_all()
 
 # Setup GenAI
-genai.configure(api_key=os.getenv("GEMINI_API_KEY", "DUMMY_KEY"))
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 STATES = [
     'BUSINESS_TASK_ANALYSIS',
@@ -36,16 +38,35 @@ STATES = [
     'SRS_ASSEMBLY_AND_AUDIT'
 ]
 
+
 def load_prompt(state_id):
-    prompt_path = os.path.join('Prompts', f"{state_id}.md")
-    if os.path.exists(prompt_path):
-        with open(prompt_path, 'r', encoding='utf-8') as f:
+    # Используем glob для поиска файла с любым суффиксом
+    files = glob.glob(os.path.join('Prompts', f"{state_id}*.md"))
+    if files:
+        with open(files[0], 'r', encoding='utf-8') as f:
             return f.read()
-    return f"System prompt for {state_id}"
+    return f"Return response in JSON format for {state_id}"
+
+
+def get_project_context(project_id):
+    # Собираем все утвержденные блоки ТЗ
+    blocks = ApprovedBlock.query.filter_by(project_id=project_id, status='approved').all()
+    context_parts = []
+    for b in blocks:
+        context_parts.append(f"### Раздел: {b.state_id}\n{b.content}")
+
+    # Можно также добавить дистиллированные данные из файлов
+    files = ProjectFile.query.filter_by(project_id=project_id).all()
+    for f in files:
+        context_parts.append(f"### Данные из файла {f.filename}:\n{f.distilled_context}")
+
+    return "\n\n".join(context_parts)
+
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/api/projects', methods=['GET', 'POST'])
 def handle_projects():
@@ -61,6 +82,7 @@ def handle_projects():
         projects = Project.query.all()
         return jsonify([p.to_dict() for p in projects])
 
+
 @app.route('/api/projects/<int:project_id>', methods=['GET'])
 def get_project(project_id):
     project = Project.query.get_or_404(project_id)
@@ -75,58 +97,99 @@ def get_project(project_id):
         'files': [f.to_dict() for f in files]
     })
 
+
 @app.route('/api/projects/<int:project_id>/chat', methods=['POST'])
 def chat(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.json
     message = data.get('message', '')
-    
-    # Save user message
+
+    # Сохраняем сообщение пользователя в БД
     user_chat = ChatHistory(project_id=project.id, state_id=project.current_state, role='user', content=message)
     db.session.add(user_chat)
     db.session.commit()
 
-    # FR-0 / FR-2 Trigger
-    # In a fully implemented logic, we call the Gemini API here.
-    # We simulate the API call for MVP purposes.
-    
-    # We would use gemini-3.1-pro-preview
-    # model = genai.GenerativeModel('gemini-3.1-pro-preview')
-    # Use Structured outputs (JSON)
-    # prompt = build_prompt(project)
-    
-    system_prompt_length = len(load_prompt(project.current_state))
-    approved_blocks_count = ApprovedBlock.query.filter_by(project_id=project.id).count()
+    # --- СЦЕНАРИЙ 1: ДИСПЕТЧЕР (Gemini 2.5 Flash) ---
     chat_history_length = ChatHistory.query.filter_by(project_id=project.id).count()
-    
-    sard_logger.debug(f"AI Request Context: SystemPrompt_Length={system_prompt_length}, ApprovedBlocks_Count={approved_blocks_count}, ChatHistory_Length={chat_history_length}")
-    sard_logger.info("Executing API request to gemini-3.1-pro-preview")
+    if project.current_state == 'BUSINESS_TASK_ANALYSIS' and chat_history_length == 1:
+        sard_logger.info("Running Dispatcher on Gemini 2.5 Flash...")
+        dispatcher_prompt = load_prompt("SYS_DISPATCHER_m1")
 
-    # Mocking cognitive simulation response
-    response_json = {
-        "agents_dialogue": [
-            {"agent": "Architect", "message": f"User says: {message}. We need more context on {project.current_state}."},
-            {"agent": "DevOps", "message": "I agree. Let's ask for the scaling requirements."}
-        ],
-        "facilitator_summary": f"Please clarify the requirements for {project.current_state}."
-    }
-    
-    # response = model.generate_content(prompt)
-    sard_logger.debug(f"Raw AI Response: {json.dumps(response_json)}")
-    
+        model_id = 'gemini-2.5-flash'
+        response = client.models.generate_content(
+            model=model_id,
+            contents=f"{dispatcher_prompt}\n\nUSER BRIEF:\n{message}",
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+
+        # Парсим результат и создаем черновики (логика из твоего исходника)
+        try:
+            parsed_res = json.loads(response.text)
+            extracted = parsed_res.get('extracted_data', {})
+            mapping = {
+                'PROJECT_CONTEXT_MODELING': extracted.get('bucket_2_roles', []),
+                'FUNCTIONAL_REQUIREMENTS_DEVELOPMENT': extracted.get('bucket_3_functions', []),
+                'NFR_FORMALIZATION': extracted.get('bucket_4_nfr', [])
+            }
+            for state_id, items in mapping.items():
+                if items:
+                    content = "\n".join(f"- {item}" for item in items)
+                    db.session.add(
+                        ApprovedBlock(project_id=project.id, state_id=state_id, content=content, status='draft'))
+
+            # Формируем ответ от ИИ
+            reply_content = json.dumps({
+                "agents_dialogue": [
+                    {"agent": "System Dispatcher", "message": "Бриф проанализирован. Черновики созданы."}],
+                "facilitator_summary": "Я разложил ваш запрос по полочкам. Давайте начнем с уточнения бизнес-целей."
+            }, ensure_ascii=False)
+
+            model_chat = ChatHistory(project_id=project.id, state_id=project.current_state, role='model',
+                                     content=reply_content)
+            db.session.add(model_chat)
+            db.session.commit()
+            return jsonify(model_chat.to_dict())
+        except Exception as e:
+            sard_logger.error(f"Dispatcher failed: {e}")
+
+    # --- СЦЕНАРИЙ 2: ГЛУБОКАЯ АНАЛИТИКА (Gemini 3.1 Pro Preview) ---
+    sard_logger.info(f"Running Analysis on Gemini 3.1 Pro for state: {project.current_state}")
+
     try:
-        # In real code: parsed_res = json.loads(response.text)
-        parsed_res = response_json
-    except json.JSONDecodeError as e:
-        sard_logger.error(f"JSONDecodeError during AI response parsing: {e}")
+        system_prompt = load_prompt(project.current_state)
+        past_context = get_project_context(project.id)
+        full_query = (
+            f"SYSTEM_INSTRUCTIONS:\n{system_prompt}\n\n"
+            f"PREVIOUS_APPROVED_CONTEXT:\n{past_context}\n\n"
+            f"USER_MESSAGE:\n{message}\n\n"
+            f"IMPORTANT: Return ONLY a valid JSON object. Do not include markdown formatting like ```json."
+        )
+
+        model_id = 'gemini-3.1-pro-preview'
+        # Используем словарь для конфига, без temperature
+        response = client.models.generate_content(
+            model=model_id,
+            contents=full_query
+        )
+
+        # Сохраняем реальный ответ нейронки
+        model_chat = ChatHistory(
+            project_id=project.id,
+            state_id=project.current_state,
+            role='model',
+            content=response.text
+        )
+
+        db.session.add(model_chat)
+        db.session.commit()
+        return jsonify(model_chat.to_dict())
+
     except Exception as e:
-        sard_logger.error(f"Error calling model: {e}")
+        sard_logger.error(f"Critical API Error: {e}")
+        return jsonify({"error": "Model 3.1 Pro unavailable or failed", "details": str(e)}), 500
 
-    model_chat = ChatHistory(project_id=project.id, state_id=project.current_state, role='model', content=json.dumps(response_json))
-    db.session.add(model_chat)
-    db.session.commit()
-
-    return jsonify(model_chat.to_dict())
 
 @app.route('/api/projects/<int:project_id>/block', methods=['POST'])
 def save_block(project_id):
@@ -135,7 +198,7 @@ def save_block(project_id):
     data = request.json
     content = data.get('content', '')
     state_id = data.get('state_id', project.current_state)
-    
+
     block = ApprovedBlock.query.filter_by(project_id=project.id, state_id=state_id).first()
     if block:
         block.content = content
@@ -143,15 +206,15 @@ def save_block(project_id):
     else:
         block = ApprovedBlock(project_id=project.id, state_id=state_id, content=content, status='approved')
         db.session.add(block)
-    
+
     # FR-4 Logic: Soft rollback invalidation if saving previous step
     if STATES.index(state_id) < STATES.index(project.current_state):
         idx = STATES.index(state_id)
-        for subsequent_state in STATES[idx+1: STATES.index(project.current_state)+1]:
+        for subsequent_state in STATES[idx + 1: STATES.index(project.current_state) + 1]:
             b = ApprovedBlock.query.filter_by(project_id=project.id, state_id=subsequent_state).first()
             if b:
                 b.status = 'outdated'
-        project.current_state = state_id # Soft rollback
+        project.current_state = state_id  # Soft rollback
         sard_logger.info(f"Project state changed (Soft Rollback): state_id={project.current_state}")
     elif state_id == project.current_state:
         # Advance current state if possible
@@ -159,12 +222,13 @@ def save_block(project_id):
         if idx < len(STATES) - 1:
             project.current_state = STATES[idx + 1]
             sard_logger.info(f"Project state changed (Advanced): state_id={project.current_state}")
-    
+
     # Cleanup chat for current state
     ChatHistory.query.filter_by(project_id=project.id, state_id=state_id).delete()
-    
+
     db.session.commit()
     return jsonify({'status': 'success', 'project': project.to_dict()})
+
 
 @app.route('/api/projects/<int:project_id>/upload', methods=['POST'])
 def upload_file(project_id):
@@ -175,19 +239,32 @@ def upload_file(project_id):
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
-    
-    # In a real impl, decode PDF/TXT, send to gemini-2.5-flash
+
     raw_text = file.read().decode('utf-8', errors='ignore')
-    
+
     sard_logger.info(f"Starting AI-Distillation for {file.filename} via gemini-2.5-flash")
-    # Mock distillation
-    distilled_context = json.dumps({"facts": ["Extracted facts from file"]})
-    
-    new_file = ProjectFile(project_id=project.id, filename=file.filename, raw_text=raw_text, distilled_context=distilled_context)
+
+    try:
+        distiller_prompt = load_prompt("FILE_PREPROCESSOR_m1")  # Убедись, что имя файла промпта верное
+
+        # Вызываем 2.5 Flash для быстрого извлечения фактов
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=f"{distiller_prompt}\n\nDOCUMENT TEXT:\n{raw_text}"
+        )
+        distilled_context = response.text
+        sard_logger.info("Distillation successful")
+    except Exception as e:
+        sard_logger.error(f"Distillation failed: {e}")
+        distilled_context = json.dumps({"error": "Failed to process file", "details": str(e)})
+
+    new_file = ProjectFile(project_id=project.id, filename=file.filename, raw_text=raw_text,
+                           distilled_context=distilled_context)
     db.session.add(new_file)
     db.session.commit()
-    
+
     return jsonify(new_file.to_dict())
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

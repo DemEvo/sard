@@ -73,6 +73,23 @@ const translations = {
     }
 };
 
+const HINTS = {
+    ru: {
+        'BUSINESS_TASK_ANALYSIS': 'Опишите бизнес-идею, целевую аудиторию и модель монетизации. ИИ-агенты (Product Manager и Инвестор) помогут выявить слепые зоны.',
+        'PROJECT_CONTEXT_MODELING': 'Опишите контекст использования, ожидаемые потоки данных и внешние системы.',
+        'FUNCTIONAL_REQUIREMENTS_DEVELOPMENT': 'Сформулируйте основной функционал (экраны, кнопки, действия пользователя).',
+        'NFR_FORMALIZATION': 'Укажите нефункциональные требования: платформы, стеки, ожидаемые нагрузки, требования к скорости или безопасности.',
+        'SRS_ASSEMBLY_AND_AUDIT': 'Финальная спецификация (SRS) генерируется и ревьюится здесь.'
+    },
+    en: {
+        'BUSINESS_TASK_ANALYSIS': 'Describe the business idea, target audience, and monetization model. AI agents will help identify blind spots.',
+        'PROJECT_CONTEXT_MODELING': 'Describe the context of use, expected data flows, and external systems.',
+        'FUNCTIONAL_REQUIREMENTS_DEVELOPMENT': 'Formulate the main functionality (screens, buttons, user actions).',
+        'NFR_FORMALIZATION': 'Specify non-functional requirements: platforms, stacks, expected load, performance or security requirements.',
+        'SRS_ASSEMBLY_AND_AUDIT': 'Final Software Requirements Specification (SRS) is generated and reviewed here.'
+    }
+};
+
 let currentLang = 'ru';
 
 function getTrans(key, params = {}) {
@@ -198,14 +215,19 @@ function renderAccordion() {
 
 function renderActiveState(stateId, blockDraft) {
     const defaultDraft = blockDraft ? blockDraft.content : '';
+    const hintText = HINTS[currentLang][stateId] || '';
+    const hintLabel = currentLang === 'ru' ? 'Подсказка' : 'Hint';
     return `
+        <div class="state-hint" style="background: rgba(88, 166, 255, 0.1); padding: 1rem; border-left: 4px solid var(--primary); border-radius: 4px; margin-bottom: 1rem;">
+            <strong>💡 ${hintLabel}:</strong> ${hintText}
+        </div>
         <div class="chat-box" id="chat-box-${stateId}">
             <div class="message model">
                 ${getTrans('msg_greeting', { stateId: stateId })}
             </div>
         </div>
-        <div class="chat-input">
-            <input type="text" id="chat-msg-${stateId}" placeholder="${getTrans('placeholder_chat')}" onkeypress="handleEnter(event, '${stateId}')">
+        <div class="chat-input" style="align-items: flex-start;">
+            <textarea id="chat-msg-${stateId}" placeholder="${getTrans('placeholder_chat')}" onkeydown="handleEnter(event, '${stateId}')"></textarea>
             <button class="primary" onclick="sendMessage('${stateId}')">${getTrans('btn_send')}</button>
         </div>
         <hr style="border:0; border-top:1px solid var(--border); margin: 1.5rem 0;" />
@@ -338,7 +360,8 @@ function editBlock(stateId, blockId) {
 }
 
 function handleEnter(e, stateId) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
         sendMessage(stateId);
     }
 }
