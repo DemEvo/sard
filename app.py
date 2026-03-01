@@ -62,6 +62,32 @@ def get_project_context(project_id):
 
     return "\n\n".join(context_parts)
 
+def get_compressed_history(project_id, state_id, current_msg_id):
+    # Достаем все сообщения текущего этапа ДО текущего запроса
+    past_chats = ChatHistory.query.filter(
+        ChatHistory.project_id == project_id,
+        ChatHistory.state_id == state_id,
+        ChatHistory.id < current_msg_id
+    ).order_by(ChatHistory.id).all()
+
+    if not past_chats:
+        return "Диалог только начат."
+
+    compressed_log = []
+    for c in past_chats:
+        if c.role == 'user':
+            compressed_log.append(f"ПОЛЬЗОВАТЕЛЬ: {c.content}")
+        elif c.role == 'model':
+            try:
+                # Пытаемся вытащить только сухую выжимку фасилитатора
+                parsed = json.loads(c.content)
+                summary = parsed.get("facilitator_summary", "")
+                if summary:
+                    compressed_log.append(f"ИИ-ФАСИЛИТАТОР: {summary}")
+            except:
+                pass # Игнорируем невалидные ответы
+
+    return "\n\n".join(compressed_log)
 
 @app.route('/')
 def index():
@@ -158,13 +184,18 @@ def chat(project_id):
     sard_logger.info(f"Running Analysis on Gemini 3.1 Pro for state: {project.current_state}")
 
     try:
+        # 1. Инструкции этапа
         system_prompt = load_prompt(project.current_state)
+        # 2. Долгосрочная память (фундамент)
         past_context = get_project_context(project.id)
+        # 3. Краткосрочная память (история чата)
+        compressed_history = get_compressed_history(project.id, project.current_state, user_chat.id)
+
         full_query = (
-            f"SYSTEM_INSTRUCTIONS:\n{system_prompt}\n\n"
-            f"PREVIOUS_APPROVED_CONTEXT:\n{past_context}\n\n"
-            f"USER_MESSAGE:\n{message}\n\n"
-            f"IMPORTANT: Return ONLY a valid JSON object. Do not include markdown formatting like ```json."
+            f"ИНСТРУКЦИЯ СИСТЕМЫ:\n{system_prompt}\n\n"
+            f"УТВЕРЖДЕННЫЙ КОНТЕКСТ ПРОЕКТА (ФУНДАМЕНТ):\n{past_context}\n\n"
+            f"ИСТОРИЯ ТЕКУЩЕГО ОБСУЖДЕНИЯ:\n{compressed_history}\n\n"
+            f"ВАЖНО: Отвечай строго в формате JSON, без обертки ```json."
         )
 
         model_id = 'gemini-3.1-pro-preview'

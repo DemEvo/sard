@@ -258,27 +258,40 @@ function renderCompletedState(stateId, block) {
 function appendMessageToChat(chatBox, messageObj) {
     const p = document.createElement('div');
     p.className = `message ${messageObj.role}`;
+
+    // ВАЖНО: Это CSS-свойство заставляет браузер отображать реальные переносы строк
+    p.style.whiteSpace = 'pre-wrap';
+
     if (messageObj.role === 'user') {
         p.innerText = messageObj.content;
     } else {
         try {
             const parsed = JSON.parse(messageObj.content);
-            p.innerHTML = `
-                <div style="margin-bottom: 10px;"><strong>🤖 ${getTrans('label_cognitive')}:</strong></div>
-                ${parsed.agents_dialogue.map(a => `<div style="margin-bottom:5px;"><em>${a.agent}</em>: ${a.message}</div>`).join('')}
-                <hr style="border-top:1px solid rgba(255,255,255,0.1);">
-                <div style="color: var(--text-color);"><strong>👑 ${getTrans('label_facilitator')}:</strong> ${parsed.facilitator_summary}</div>
-            `;
 
-            // Try updating draft automatically if the message contains one
-            const draftEl = document.getElementById(`draft-content-${messageObj.state_id}`);
-            if (draftEl && parsed.facilitator_summary) {
-                // In full implementation, facilitator_summary or an explicit draft field 
-                // would overwrite the draft-content text area.
-                draftEl.value += (draftEl.value ? '\\n\\n' : '') + parsed.facilitator_summary;
+            // Если ИИ вернул экранированную строку (как в твоем примере)
+            if (typeof parsed === 'string') {
+                p.innerText = parsed;
             }
+            // Если ИИ вернул диалог агентов (стандартный сценарий)
+            else if (parsed.agents_dialogue) {
+                p.innerHTML = `
+                    <div style="margin-bottom: 10px;"><strong>🤖 ${getTrans('label_cognitive')}:</strong></div>
+                    ${parsed.agents_dialogue.map(a => `<div style="margin-bottom:5px;"><em>${a.agent}</em>: ${a.message}</div>`).join('')}
+                    <hr style="border-top:1px solid rgba(255,255,255,0.1);">
+                    <div style="color: var(--text-color);"><strong>👑 ${getTrans('label_facilitator')}:</strong> ${parsed.facilitator_summary}</div>
+                `;
 
+                const draftEl = document.getElementById(`draft-content-${messageObj.state_id}`);
+                if (draftEl && parsed.facilitator_summary) {
+                    draftEl.value += (draftEl.value ? '\n\n' : '') + parsed.facilitator_summary;
+                }
+            }
+            // Для любого другого JSON
+            else {
+                p.innerText = JSON.stringify(parsed, null, 2);
+            }
         } catch (e) {
+            // Если пришел чистый текст, а не JSON
             p.innerText = messageObj.content;
         }
     }
