@@ -155,17 +155,30 @@ h1 span {
     resize: vertical;
 }
 
-textarea::-webkit-scrollbar {
+/* --- Скроллбары SARD --- */
+
+::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
 
-textarea::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
+::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    transition: background-color 0.2s;
 }
 
-textarea::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 4px;
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--primary);
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 input[type="text"],
@@ -222,10 +235,32 @@ aside {
     top: 2rem;
 }
 
-aside input[type="file"] {
-    display: block;
+.file-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 1rem;
     width: 100%;
+}
+
+.custom-file-upload {
+    display: inline-block;
+    padding: 8px 16px;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.custom-file-upload:hover {
+    border-color: var(--primary);
+    background-color: rgba(88, 166, 255, 0.1);
 }
 
 ul#file-list {
@@ -241,4 +276,64 @@ ul#file-list li {
     margin-bottom: 0.5rem;
     font-size: 0.9em;
     border-left: 2px solid var(--primary);
+}
+
+/* Project Selector Styles */
+.project-dropdown {
+    padding: 0.6rem 2.5rem 0.6rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background-color: rgba(13, 17, 23, 0.8);
+    color: var(--text-color);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9d1d9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.7rem center;
+    background-size: 1em;
+    transition: all 0.2s;
+}
+
+.project-dropdown:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.project-dropdown option {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+.project-btn {
+    padding: 0.6rem 1.2rem;
+    background-color: var(--primary);
+    color: #0d1117;
+    font-size: 0.95rem;
+}
+
+.project-btn:hover {
+    background-color: #79c0ff;
+}
+
+.spinner-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(88, 166, 255, 0.2);
+    border-top: 3px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }

@@ -141,7 +141,7 @@ def chat(project_id):
         sard_logger.info("Running Dispatcher on Gemini 2.5 Flash...")
         dispatcher_prompt = load_prompt("SYS_DISPATCHER_m1")
 
-        model_id = 'gemini-2.5-flash'
+        model_id = 'gemini-3.1-flash-lite-preview'
         response = client.models.generate_content(
             model=model_id,
             contents=f"{dispatcher_prompt}\n\nUSER BRIEF:\n{message}",
@@ -280,7 +280,7 @@ def upload_file(project_id):
 
         # Вызываем 2.5 Flash для быстрого извлечения фактов
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.1-flash-lite-preview',
             contents=f"{distiller_prompt}\n\nDOCUMENT TEXT:\n{raw_text}"
         )
         distilled_context = response.text

@@ -37,7 +37,11 @@ const translations = {
         label_project: "Проект",
         label_cognitive: "Когнитивная симуляция",
         label_facilitator: "Решение фасилитатора",
-        new_project: "Новая сессия T-Spec"
+        new_project: "Новая сессия T-Spec",
+        btn_new_project: "Новый проект",
+        prompt_project_name: "Введите название нового проекта:",
+        default_project_name: "Новый проект",
+        btn_choose_file: "Выберите файл"
     },
     en: {
         title_doc: "AI T-Spec Generator",
@@ -69,7 +73,11 @@ const translations = {
         label_project: "Project",
         label_cognitive: "Cognitive Simulation",
         label_facilitator: "Facilitator Decision",
-        new_project: "New T-Spec Session"
+        new_project: "New T-Spec Session",
+        btn_new_project: "New Project",
+        prompt_project_name: "Enter new project name:",
+        default_project_name: "New Project",
+        btn_choose_file: "Choose file"
     }
 };
 
@@ -111,26 +119,30 @@ function updateTranslations() {
 
 let currentProjectId = null;
 let projectState = null;
+let allProjects = [];
 
 async function bootstrap() {
     updateTranslations();
     const res = await fetch('/api/projects');
-    const projects = await res.json();
+    allProjects = await res.json();
 
-    if (projects.length > 0) {
-        await loadProject(projects[0].id);
+    if (allProjects.length > 0) {
+        await loadProject(allProjects[allProjects.length - 1].id);
     } else {
-        await createNewProject();
+        await createNewProject(getTrans('new_project'));
     }
 }
 
-async function createNewProject() {
+async function createNewProject(title = getTrans('new_project')) {
     const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: getTrans('new_project') })
+        body: JSON.stringify({ title: title })
     });
     const proj = await res.json();
+
+    const listRes = await fetch('/api/projects');
+    allProjects = await listRes.json();
     await loadProject(proj.id);
 }
 
@@ -144,10 +156,45 @@ async function loadProject(id) {
 }
 
 function renderProjectSelector() {
-    // Optionally implemented for selecting multiple projects
-    // For MVP just show project name
     const sel = document.getElementById('project-selector');
-    sel.innerHTML = `<strong>${getTrans('label_project')}:</strong> ${projectState.project.title} (ID: ${projectState.project.id})`;
+    sel.style.display = 'flex';
+    sel.style.gap = '10px';
+    sel.style.alignItems = 'center';
+
+    let optionsHtml = '';
+    for (let proj of allProjects) {
+        const isSelected = (projectState && proj.id === projectState.project.id) ? 'selected' : '';
+        optionsHtml += `<option value="${proj.id}" ${isSelected}>${proj.title}</option>`;
+    }
+
+    sel.innerHTML = `
+        <select onchange="switchProject(this.value)" class="project-dropdown">
+            ${optionsHtml}
+        </select>
+        <button onclick="promptNewProject()" class="project-btn">+ <span data-i18n="btn_new_project">${getTrans('btn_new_project')}</span></button>
+    `;
+}
+
+async function switchProject(projectId) {
+    if (projectId == currentProjectId) return;
+    await loadProject(projectId);
+}
+
+async function promptNewProject() {
+    let title = prompt(getTrans('prompt_project_name'), getTrans('default_project_name'));
+    if (!title || title.trim() === "") return; // Отмена, если пусто
+
+    const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim() })
+    });
+    const newProj = await res.json();
+
+    // Обновляем список проектов и загружаем новый
+    const listRes = await fetch('/api/projects');
+    allProjects = await listRes.json();
+    await loadProject(newProj.id);
 }
 
 function renderAccordion() {
@@ -316,7 +363,12 @@ async function sendMessage(stateId) {
     const mMsg = document.createElement('div');
     mMsg.className = 'message model';
     mMsg.id = 'thinking-indicator';
-    mMsg.innerText = getTrans('msg_thinking');
+    mMsg.innerHTML = `
+        <div class="spinner-container">
+            <div class="spinner"></div>
+            <span>${getTrans('msg_thinking')}</span>
+        </div>
+    `;
     chatBox.appendChild(mMsg);
     chatBox.scrollTop = chatBox.scrollHeight;
 
@@ -399,6 +451,11 @@ async function uploadFile() {
 
     if (res.ok) {
         fileInput.value = '';
+        const labelSpan = fileInput.nextElementSibling.querySelector('span');
+        if (labelSpan) {
+            labelSpan.innerText = getTrans('btn_choose_file');
+            labelSpan.setAttribute('data-i18n', 'btn_choose_file');
+        }
         statusDiv.innerHTML = `<span style="color:var(--success);">${getTrans('msg_upload_ok')}</span>`;
         setTimeout(() => { statusDiv.innerHTML = ''; }, 3000);
         await loadProject(currentProjectId);
@@ -418,4 +475,19 @@ function renderFiles() {
 }
 
 // Initialize
-document.addEventListener("DOMContentLoaded", bootstrap);
+document.addEventListener("DOMContentLoaded", () => {
+    bootstrap();
+    const fileInput = document.getElementById('file-input');
+    if (fileInput) {
+        fileInput.addEventListener('change', function () {
+            const labelSpan = this.nextElementSibling.querySelector('span');
+            if (this.files && this.files.length > 0) {
+                labelSpan.innerText = this.files[0].name;
+                labelSpan.removeAttribute('data-i18n');
+            } else {
+                labelSpan.innerText = getTrans('btn_choose_file');
+                labelSpan.setAttribute('data-i18n', 'btn_choose_file');
+            }
+        });
+    }
+});
